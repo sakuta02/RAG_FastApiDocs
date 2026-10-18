@@ -1,0 +1,11 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+.env
+doc_index/
+bm25_index.pkl
+source_documents/
+tickets/
+_fastapi_clone/
+.DS_Store

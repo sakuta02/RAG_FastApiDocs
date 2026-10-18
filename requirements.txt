@@ -1,0 +1,7 @@
+sentence-transformers
+chromadb
+rank-bm25
+ollama
+python-dotenv
+requests
+streamlit
