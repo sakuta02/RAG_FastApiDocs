@@ -6,7 +6,7 @@ import random
 
 import ollama
 
-from search_index import get_collection
+from search_index import get_vector_store
 
 LLM_MODEL = "qwen2.5:3b-instruct"
 SAMPLE_SIZE = 85
@@ -61,9 +61,8 @@ def main():
 
 
 def load_doc_chunks():
-    collection = get_collection()
-    result = collection.get(where={"source_type": "docs"})
-    chunks = list(zip(result["documents"], result["metadatas"]))
+    nodes = get_vector_store().get_nodes(None)
+    chunks = [(n.text, n.metadata) for n in nodes if n.metadata["source_type"] == "docs"]
     return [c for c in chunks if len(c[0]) > MIN_CHUNK_CHARS]
 
 
@@ -73,7 +72,7 @@ def build_entry(chunk):
     return {
         "question": question,
         "source_path": metadata["source_path"],
-        "heading": metadata["heading"],
+        "heading": text.split("\n", 1)[0],
         "answerable": True,
     }
 

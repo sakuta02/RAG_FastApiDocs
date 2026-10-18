@@ -2,41 +2,41 @@
 
 import sys
 
-from sentence_transformers import CrossEncoder
+from llama_index.core.postprocessor import SentenceTransformerRerank
 
-import hybrid_search
-from search_index import get_collection
+from hybrid_search import CANDIDATE_POOL, get_hybrid_retriever
+from search_index import get_index
 
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 TOP_K = 5
-CANDIDATE_POOL = 30  # сколько результатов гибридного поиска реранкаем перед отсечением до TOP_K
 
 DEFAULT_PROMPT = "How do I add a dependency to a path operation?"
 
 
 def main():
     prompt = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROMPT
-    collection = get_collection()
-    bm25_index = hybrid_search.load_bm25_index()
-    cross_encoder = CrossEncoder(RERANK_MODEL, device="mps")
+    retriever = get_candidate_retriever(get_index())
+    reranker = get_reranker()
 
     print(f"Результаты после реранка для '{prompt}'")
-    results = rerank(prompt, collection, bm25_index, cross_encoder)
-    for rank, (doc, metadata, score) in enumerate(results, start=1):
-        print(f"\n#{rank}  Скор кросс-энкодера: {score:.4f}")
-        print(metadata)
-        print(doc[:300])
+    for rank, node in enumerate(rerank(prompt, retriever, reranker), start=1):
+        print(f"\n#{rank}  Скор кросс-энкодера: {node.score:.4f}")
+        print(node.metadata)
+        print(node.text[:300])
 
 
-def rerank(query, collection, bm25_index, cross_encoder, top_k=TOP_K):
-    candidates = hybrid_search.hybrid_search(query, collection, bm25_index, top_k=CANDIDATE_POOL)
-    docs_and_meta = [hybrid_search.lookup(chunk_id, bm25_index) for chunk_id, _ in candidates]
+def get_candidate_retriever(index):
+    # на реранк отдаём CANDIDATE_POOL кандидатов, а до TOP_K сужает уже сам реранкер
+    return get_hybrid_retriever(index, top_k=CANDIDATE_POOL)
 
+
+def get_reranker():
+    return SentenceTransformerRerank(model=RERANK_MODEL, top_n=TOP_K, device="mps")
+
+
+def rerank(query, retriever, reranker):
     # кросс-энкодер читает вопрос и кандидата вместе, поэтому оценивает точнее dense-поиска
-    scores = cross_encoder.predict([(query, doc) for doc, _ in docs_and_meta])
-
-    reranked = sorted(zip(docs_and_meta, scores), key=lambda pair: pair[1], reverse=True)
-    return [(doc, meta, score) for (doc, meta), score in reranked[:top_k]]
+    return reranker.postprocess_nodes(retriever.retrieve(query), query_str=query)
 
 
 if __name__ == "__main__":

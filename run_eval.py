@@ -6,11 +6,9 @@
 import json
 import sys
 
-from sentence_transformers import CrossEncoder
-
-import hybrid_search
-import rerank as rerank_module
-from search_index import get_collection
+from hybrid_search import get_hybrid_retriever
+from rerank import get_candidate_retriever, get_reranker, rerank
+from search_index import get_index
 
 EVAL_FILE = "eval_dataset.jsonl"
 TOP_K = 5
@@ -36,32 +34,17 @@ def main():
 
 
 def build_search_fn(mode):
-    collection = get_collection()
+    index = get_index()
     if mode == "dense":
-        return lambda question: dense_paths(collection, question)
+        retriever = index.as_retriever(similarity_top_k=TOP_K)
+        return lambda question: retriever.retrieve(question)
     if mode == "hybrid":
-        bm25_index = hybrid_search.load_bm25_index()
-        return lambda question: hybrid_paths(collection, bm25_index, question)
+        retriever = get_hybrid_retriever(index, top_k=TOP_K)
+        return lambda question: retriever.retrieve(question)
     if mode == "rerank":
-        bm25_index = hybrid_search.load_bm25_index()
-        cross_encoder = CrossEncoder(rerank_module.RERANK_MODEL, device="mps")
-        return lambda question: rerank_paths(collection, bm25_index, cross_encoder, question)
+        retriever, reranker = get_candidate_retriever(index), get_reranker()
+        return lambda question: rerank(question, retriever, reranker)
     raise ValueError(f"Unknown retriever mode: {mode}")
-
-
-def dense_paths(collection, question):
-    results = collection.query(query_texts=[question], n_results=TOP_K)
-    return [m["source_path"] for m in results["metadatas"][0]]
-
-
-def hybrid_paths(collection, bm25_index, question):
-    fused = hybrid_search.hybrid_search(question, collection, bm25_index, top_k=TOP_K)
-    return [hybrid_search.lookup(chunk_id, bm25_index)[1]["source_path"] for chunk_id, _ in fused]
-
-
-def rerank_paths(collection, bm25_index, cross_encoder, question):
-    results = rerank_module.rerank(question, collection, bm25_index, cross_encoder, top_k=TOP_K)
-    return [metadata["source_path"] for _, metadata, _ in results]
 
 
 def load_eval_set():
@@ -69,7 +52,8 @@ def load_eval_set():
         return [json.loads(line) for line in f]
 
 
-def find_rank(paths, correct_path):
+def find_rank(nodes, correct_path):
+    paths = [node.metadata["source_path"] for node in nodes]
     if correct_path in paths:
         return paths.index(correct_path) + 1
     return None

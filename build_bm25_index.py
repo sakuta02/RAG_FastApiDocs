@@ -1,47 +1,21 @@
-"""Строим BM25-индекс (поиск по ключевым словам) по тем же чанкам, что лежат в Chroma."""
+"""Строим BM25-индекс (поиск по ключевым словам) по тем же нодам, что лежат в Chroma."""
 
-import pickle
-import re
+from llama_index.retrievers.bm25 import BM25Retriever
 
-from chromadb import PersistentClient
+from search_index import get_vector_store
 
-from rank_bm25 import BM25Okapi
-
-COLLECTION_NAME = "doc_index"
-PERSIST_DIR = "doc_index"
-BM25_INDEX_PATH = "bm25_index.pkl"
-
-TOKEN_RE = re.compile(r"\w+")
+BM25_INDEX_PATH = "li_bm25"
 
 
 def main():
-    print("Читаем чанки из Chroma...")
-    ids, documents, metadatas = load_chunks()
-    print(f"Токенизируем {len(documents)} чанков...")
-    tokenized = [tokenize(doc) for doc in documents]
-    print("Строим BM25-индекс...")
-    bm25 = BM25Okapi(tokenized)
+    print("Читаем ноды из Chroma...")
+    # берём ноды из того же хранилища, чтобы фьюжн потом узнавал дубликаты по хэшу
+    nodes = get_vector_store().get_nodes(None)
+    print(f"Строим BM25-индекс по {len(nodes)} нодам...")
+    retriever = BM25Retriever.from_defaults(nodes=nodes)
     print("Сохраняем индекс...")
-    save_index(bm25, ids, documents, metadatas)
+    retriever.persist(BM25_INDEX_PATH)
     print("Готово.")
-
-
-def load_chunks():
-    client = PersistentClient(path=PERSIST_DIR)
-    collection = client.get_collection(COLLECTION_NAME)
-    result = collection.get()
-    return result["ids"], result["documents"], result["metadatas"]
-
-
-def tokenize(text):
-    return TOKEN_RE.findall(text.lower())
-
-
-def save_index(bm25, ids, documents, metadatas):
-    with open(BM25_INDEX_PATH, "wb") as f:
-        pickle.dump(
-            {"bm25": bm25, "ids": ids, "documents": documents, "metadatas": metadatas}, f
-        )
 
 
 if __name__ == "__main__":

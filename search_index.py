@@ -2,37 +2,43 @@
 
 import sys
 
-from chromadb import PersistentClient
-from chromadb.utils import embedding_functions
+import chromadb
+from llama_index.core import VectorStoreIndex
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.vector_stores.chroma import ChromaVectorStore
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 COLLECTION_NAME = "doc_index"
-PERSIST_DIR = "doc_index"
+PERSIST_DIR = "li_index"
 DEFAULT_PROMPT = "How do I add a dependency to a path operation?"
 
 
 def main():
-    collection = get_collection()
+    retriever = get_index().as_retriever(similarity_top_k=5)
 
     prompt = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROMPT
 
     print(f"Ищем подходящие куски документов для '{prompt}'")
-    results = collection.query(query_texts=[prompt], n_results=5)
-    for doc, metadata, distance in zip(
-        results["documents"][0], results["metadatas"][0], results["distances"][0]
-    ):
-        print(f"\nКосинусное расстояние (чем меньше, тем лучше): {distance:.4f}")
-        print(metadata)
-        print(doc[:300])
+    for node in retriever.retrieve(prompt):
+        print(f"\nСходство (чем больше, тем лучше): {node.score:.4f}")
+        print(node.metadata)
+        print(node.text[:300])
 
 
-def get_collection():
-    # берём ту же модель и ту же метрику расстояния, что и при создании индекса
-    embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name=EMBEDDING_MODEL, device="mps", normalize_embeddings=True
+def get_embed_model():
+    # та же модель и нормализация, что и при создании индекса
+    return HuggingFaceEmbedding(
+        model_name=EMBEDDING_MODEL, device="mps", normalize=True, embed_batch_size=64
     )
-    client = PersistentClient(path=PERSIST_DIR)
-    return client.get_collection(COLLECTION_NAME, embedding_function=embed_fn)
+
+
+def get_vector_store():
+    collection = chromadb.PersistentClient(path=PERSIST_DIR).get_collection(COLLECTION_NAME)
+    return ChromaVectorStore(chroma_collection=collection)
+
+
+def get_index():
+    return VectorStoreIndex.from_vector_store(get_vector_store(), embed_model=get_embed_model())
 
 
 if __name__ == "__main__":

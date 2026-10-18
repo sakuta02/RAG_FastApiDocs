@@ -9,3 +9,5 @@ source_documents/
 tickets/
 _fastapi_clone/
 .DS_Store
+li_index/
+li_bm25/
